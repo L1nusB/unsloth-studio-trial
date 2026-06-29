@@ -5,6 +5,11 @@ A small sandbox for trying **Unsloth Studio** (Unsloth's no-code fine-tuning web
 `llm-fine-tuning` repo. **Notes and deployment recipes only**, no fine-tuning code of our own.
 
 ## Start here
+
+> **Automating Studio?** Load the **`unsloth-studio` skill** (`.claude/skills/unsloth-studio/`) —
+> it's the workflow + gotchas layer (deploy, auth, drive the REST API, pitfalls) and routes to the
+> docs/scripts below.
+
 - **`docs/roadmap.md`** — the living plan, current status, and decisions.
 - **`docs/deployment.md`** — RunPod template / container-image / start-command recipe (incl. password automation).
 - **`docs/runpod-access.md`** — reaching the Studio UI (proxy URL vs SSH `-L` tunnel).

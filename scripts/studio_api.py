@@ -28,12 +28,27 @@ import json
 import os
 import sys
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
 
+# RunPod's HTTP proxy (Cloudflare) returns 403 to the default Python-urllib User-Agent (bot
+# filtering). A browser-like UA is required for any API call routed through the proxy URL.
+_UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
+
+
+def _origin(url: str) -> str:
+    """scheme://host[:port] for the given URL — Studio's auth enforces a same-origin
+    Origin/Referer (a CSRF guard), so requests via the RunPod proxy must echo the proxy
+    origin the same way the browser does, or login is refused with 403 even on a valid password."""
+    parts = urllib.parse.urlsplit(url)
+    return f"{parts.scheme}://{parts.netloc}"
+
+
 def _request(method: str, url: str, token: str, body: bytes | None) -> tuple[int, str]:
-    headers = {"Authorization": f"Bearer {token}"}
+    origin = _origin(url)
+    headers = {"Authorization": f"Bearer {token}", "User-Agent": _UA, "Origin": origin, "Referer": origin + "/"}
     if body is not None:
         headers["Content-Type"] = "application/json"
     req = urllib.request.Request(url, data=body, headers=headers, method=method)
@@ -55,7 +70,7 @@ def _login(base: str) -> str:
     req = urllib.request.Request(
         f"{base}/api/auth/login",
         data=data,
-        headers={"Content-Type": "application/json"},
+        headers={"Content-Type": "application/json", "User-Agent": _UA, "Origin": base, "Referer": base + "/"},
         method="POST",
     )
     try:
@@ -63,6 +78,34 @@ def _login(base: str) -> str:
             return json.load(resp)["access_token"]
     except (urllib.error.HTTPError, urllib.error.URLError, KeyError) as exc:
         sys.exit(f"Login failed: {exc}")
+
+
+def _load_dotenv(path: str = ".env") -> None:
+    """Load KEY=VALUE pairs from a local .env into os.environ (without overriding existing).
+
+    Lets this run from the Mac repo root with RUNPOD_POD_ID + STUDIO_ADMIN_PASSWORD in .env,
+    so it targets the proxy and authenticates without any secret on the command line/in chat.
+    """
+    p = Path(path)
+    if not p.is_file():
+        return
+    for raw in p.read_text().splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
+
+
+def _resolve_base() -> str:
+    """STUDIO_URL override > RunPod proxy (load-proof, when RUNPOD_POD_ID set) > localhost."""
+    explicit = os.environ.get("STUDIO_URL")
+    if explicit:
+        return explicit.rstrip("/")
+    pod = os.environ.get("RUNPOD_POD_ID")
+    if pod:
+        return f"https://{pod}-8000.proxy.runpod.net"
+    return "http://localhost:8000"
 
 
 def _read_body(arg: str | None) -> bytes | None:
@@ -81,7 +124,8 @@ def main(argv: list[str]) -> int:
     method, path = argv[0].upper(), argv[1]
     body = _read_body(argv[2] if len(argv) > 2 else None)
 
-    base = os.environ.get("STUDIO_URL", "http://localhost:8000").rstrip("/")
+    _load_dotenv()
+    base = _resolve_base()
     token = os.environ.get("STUDIO_API_KEY") or _login(base)
 
     url = f"{base}{path if path.startswith('/') else '/' + path}"

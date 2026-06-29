@@ -58,6 +58,7 @@ the start command degrades gracefully when one is missing.
 |---|---|---|
 | `STUDIO_ADMIN_PASSWORD` | *(your consistent pw, ≥8)* | **Enables password automation** — step 6 sets the Studio admin login to this on every fresh pod (no manual browser Setup). Omit → set it by hand in the browser. |
 | `REPO_URL` | `https://github.com/L1nusB/unsloth-studio-trial` | Helper repo cloned to `/workspace/<name>` (step 4); its scripts (password automation, env sync, API helper) ride along. Required for the password automation. |
+| `REPO_BRANCH` | *(unset → remote default, usually `main`)* | Optional branch to check out, e.g. while iterating on a feature branch before it's merged to `main`. |
 | `UNSLOTH_STUDIO_HOME` | `/root/.unsloth/studio` (set `/workspace/.studio` to persist) | Where Studio's venv + `auth/` + `studio.db` + llama.cpp build live. Point at `/workspace/.studio` **with a network volume** to persist across restarts (set once, fast reboots). Harmless without a volume. |
 | `GIT_USER_NAME`, `GIT_USER_EMAIL` | — | Git identity for commits made on the pod (optional). |
 | `GITHUB_PAT` | — | PAT injected into the clone URL for a **private** `REPO_URL` (public repo needs none). |
@@ -94,14 +95,19 @@ command -v uv >/dev/null || python -m pip install -qU uv
 [ -n "${GIT_USER_NAME:-}" ]  && git config --global user.name  "$GIT_USER_NAME"  || true
 [ -n "${GIT_USER_EMAIL:-}" ] && git config --global user.email "$GIT_USER_EMAIL" || true
 
-# 4. Clone/update the helper repo from $REPO_URL (PAT-injected if GITHUB_PAT set; public repo works
-#    without). $REPO is derived from the URL basename so the rest of the script is repo-name-agnostic.
+# 4. Clone/update the helper repo from $REPO_URL. Optional $REPO_BRANCH (default = the remote
+#    default branch, usually main). PAT-injected if GITHUB_PAT set; public repo works without.
+#    $REPO is derived from the URL basename so the rest of the script is repo-name-agnostic.
 REPO=""
 if [ -n "${REPO_URL:-}" ]; then
   REPO="/workspace/$(basename "${REPO_URL%.git}")"
   AUTH_URL="$REPO_URL"
   if [ -n "${GITHUB_PAT:-}" ] && [[ "$AUTH_URL" == https://* ]]; then AUTH_URL="https://$GITHUB_PAT@${AUTH_URL#https://}"; fi
-  if [ -d "$REPO/.git" ]; then git -C "$REPO" remote set-url origin "$AUTH_URL"; git -C "$REPO" pull --ff-only || true;
+  if [ -d "$REPO/.git" ]; then
+    git -C "$REPO" remote set-url origin "$AUTH_URL"
+    if [ -n "${REPO_BRANCH:-}" ]; then git -C "$REPO" fetch origin "$REPO_BRANCH" && git -C "$REPO" checkout -B "$REPO_BRANCH" "origin/$REPO_BRANCH" || true;
+    else git -C "$REPO" pull --ff-only || true; fi
+  elif [ -n "${REPO_BRANCH:-}" ]; then git clone --branch "$REPO_BRANCH" "$AUTH_URL" "$REPO" || true;
   else git clone "$AUTH_URL" "$REPO" || true; fi
 fi
 

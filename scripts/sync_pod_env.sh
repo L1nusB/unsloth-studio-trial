@@ -12,7 +12,10 @@
 set -e
 export PATH="$PATH:/usr/local/bin:$HOME/.local/bin:$HOME/.cargo/bin"
 
-VARS_TO_EXTRACT=("OPENROUTER_API_KEY" "UV_CACHE_DIR" "HF_HOME" "HF_XET_HIGH_PERFORMANCE" "HF_TOKEN")
+# UNSLOTH_STUDIO_HOME is included so an interactive `unsloth …` over SSH targets the same
+# venv/auth/db as the running server (the server itself inherits it from PID 1, so it doesn't
+# strictly need this — this is the SSH-shell convenience).
+VARS_TO_EXTRACT=("OPENROUTER_API_KEY" "UV_CACHE_DIR" "HF_HOME" "HF_XET_HIGH_PERFORMANCE" "HF_TOKEN" "UNSLOTH_STUDIO_HOME")
 
 echo "🔄 Syncing env vars from PID 1 into ~/.bashrc ..."
 for var in "${VARS_TO_EXTRACT[@]}"; do

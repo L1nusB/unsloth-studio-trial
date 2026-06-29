@@ -43,8 +43,30 @@ build, no registry.
 | **Expose TCP Ports** | `22` (SSH — required for `pod` CLI + `-L` tunnel) |
 | **Public IP** | yes (required for direct-TCP SSH) |
 | **GPU** | one A40 / L40 / 4090-class is plenty for a smoke test |
-| **Volume** | **network volume at `/workspace` (strongly recommended)** — required for the persistence below |
-| **Env vars** | `STUDIO_ADMIN_PASSWORD=<consistent pw>` (auto-sets the admin login on every fresh pod — see "Password automation"); `HF_TOKEN=…` (gated models); optional `UNSLOTH_STUDIO_HOME=/workspace/.studio` + `HF_HOME`/`UV_CACHE_DIR` under `/workspace` **only if** you keep a network volume (full persistence). Ensure your **SSH public key is on your RunPod account before the pod boots** |
+| **Volume** | network volume at `/workspace` only if you want full persistence (see env vars) — optional |
+| **Env vars** | see the **Environment variables** table below |
+
+Also ensure your **SSH public key is on your RunPod account before the pod boots** (RunPod injects
+account keys at start; the base image's `/start.sh` writes `$PUBLIC_KEY` to `authorized_keys`).
+
+### Environment variables
+
+Set these on the **template** (RunPod console → Environment Variables). All are optional unless noted;
+the start command degrades gracefully when one is missing.
+
+| Variable | Default / example | Purpose |
+|---|---|---|
+| `STUDIO_ADMIN_PASSWORD` | *(your consistent pw, ≥8)* | **Enables password automation** — step 6 sets the Studio admin login to this on every fresh pod (no manual browser Setup). Omit → set it by hand in the browser. |
+| `REPO_URL` | `https://github.com/L1nusB/unsloth-studio-trial` | Helper repo cloned to `/workspace/<name>` (step 4); its scripts (password automation, env sync, API helper) ride along. Required for the password automation. |
+| `UNSLOTH_STUDIO_HOME` | `/root/.unsloth/studio` (set `/workspace/.studio` to persist) | Where Studio's venv + `auth/` + `studio.db` + llama.cpp build live. Point at `/workspace/.studio` **with a network volume** to persist across restarts (set once, fast reboots). Harmless without a volume. |
+| `GIT_USER_NAME`, `GIT_USER_EMAIL` | — | Git identity for commits made on the pod (optional). |
+| `GITHUB_PAT` | — | PAT injected into the clone URL for a **private** `REPO_URL` (public repo needs none). |
+| `HF_TOKEN` | — | Hugging Face token for gated models/datasets. |
+| `HF_HOME`, `UV_CACHE_DIR` | e.g. `/workspace/.cache/hf`, `/workspace/.uv_cache` | Cache locations — put under `/workspace` (with a volume) to persist model/uv caches. |
+| `HF_XET_HIGH_PERFORMANCE`, `OPENROUTER_API_KEY` | — | Optional (HF Xet perf; OpenRouter, mirrored from the fine-tuning template). |
+| `STUDIO_API_KEY` | — | Optional alternative credential for `scripts/studio_api.py` (else it logs in with `STUDIO_ADMIN_PASSWORD`). |
+| `JUPYTER_PASSWORD` | — | Optional token for the JupyterLab on 8888 (from the base image's `/start.sh`). |
+| `PUBLIC_KEY` | *(injected by RunPod)* | Your account SSH key; the base `/start.sh` authorizes it. Not set by hand. |
 
 ### Container Start Command
 
@@ -52,59 +74,65 @@ Paste this as the pod's **Container Start Command** (replaces the repo-cloning o
 the only base-image dependency is `/start.sh`, which brings up sshd+`PUBLIC_KEY`+Jupyter):
 
 ```bash
-bash -lc 'set -euo pipefail
+bash -lc 'set -uo pipefail
 export DEBIAN_FRONTEND=noninteractive PIP_ROOT_USER_ACTION=ignore
-
-# 0. Studio home. Default = Studio's own (container disk). To PERSIST across restarts, set the
-#    template env var UNSLOTH_STUDIO_HOME=/workspace/.studio AND attach a network volume at
-#    /workspace (then install + auth + db + llama.cpp survive; password set once). Without a
-#    volume (full teardowns) persistence does not apply — the password script in 4b handles that.
+# Studio home. Default = Studio own dir (container disk). Set UNSLOTH_STUDIO_HOME=/workspace/.studio
+# (+ a network volume) to PERSIST install/auth/db/llama.cpp across restarts. Harmless without a volume.
 export UNSLOTH_STUDIO_HOME="${UNSLOTH_STUDIO_HOME:-/root/.unsloth/studio}"
 
-# 1. Bring up base services (sshd w/ PUBLIC_KEY injection + JupyterLab) in the background,
-#    so SSH is reachable immediately while Studio installs.
+# 1. Base services (sshd w/ PUBLIC_KEY injection + JupyterLab) in the background — SSH reachable
+#    immediately while Studio installs.
 /start.sh &
 
-# 2. Build deps for Unsloth Studio (llama.cpp/GGUF) + tools for the pod CLI.
-#    The devel base already has git/gcc/curl; cmake + libcurl headers are the usual gaps.
+# 2. System deps for Unsloth Studio (llama.cpp/GGUF build) + the pod CLI (rsync/tmux) + uv.
 apt-get update && apt-get install -y --no-install-recommends \
-  cmake build-essential libcurl4-openssl-dev git curl rsync tmux nano && \
+  git ninja-build rsync nano tmux cmake tree build-essential libcurl4-openssl-dev libssl-dev curl && \
   rm -rf /var/lib/apt/lists/*
+command -v uv >/dev/null || python -m pip install -qU uv
 
-# 2b. Clone this helper repo (idempotent) so its scripts (password automation, env sync) ride along.
-REPO=/workspace/unsloth-studio-trial
-if [ -d "$REPO/.git" ]; then git -C "$REPO" pull --ff-only || true; \
-  else git clone --depth 1 https://github.com/L1nusB/unsloth-studio-trial "$REPO" || true; fi
+# 3. Git identity (optional).
+[ -n "${GIT_USER_NAME:-}" ]  && git config --global user.name  "$GIT_USER_NAME"  || true
+[ -n "${GIT_USER_EMAIL:-}" ] && git config --global user.email "$GIT_USER_EMAIL" || true
 
-# 3. Install Unsloth + Studio. Creates its OWN uv venv under $UNSLOTH_STUDIO_HOME
-#    (own Python 3.13 + own cu-matched torch); the base image torch is ignored, no conflict.
-#    Do NOT set UNSLOTH_NO_TORCH=1 — that is GGUF-only and disables training.
+# 4. Clone/update the helper repo from $REPO_URL (PAT-injected if GITHUB_PAT set; public repo works
+#    without). $REPO is derived from the URL basename so the rest of the script is repo-name-agnostic.
+REPO=""
+if [ -n "${REPO_URL:-}" ]; then
+  REPO="/workspace/$(basename "${REPO_URL%.git}")"
+  AUTH_URL="$REPO_URL"
+  if [ -n "${GITHUB_PAT:-}" ] && [[ "$AUTH_URL" == https://* ]]; then AUTH_URL="https://$GITHUB_PAT@${AUTH_URL#https://}"; fi
+  if [ -d "$REPO/.git" ]; then git -C "$REPO" remote set-url origin "$AUTH_URL"; git -C "$REPO" pull --ff-only || true;
+  else git clone "$AUTH_URL" "$REPO" || true; fi
+fi
+
+# 5. Install Unsloth + Studio. Creates its OWN uv venv under $UNSLOTH_STUDIO_HOME (own Python 3.13 +
+#    own cu-matched torch; base image torch ignored, no conflict). Do NOT set UNSLOTH_NO_TORCH=1
+#    (GGUF-only, disables training).
 curl -fsSL https://unsloth.ai/install.sh | sh
 
-# 4b. Auto-set the admin password from $STUDIO_ADMIN_PASSWORD once Studio is up (background;
-#     idempotent; no-op if the var is unset or the password is already configured). This replays
-#     the browser "Setup Account" flow over the REST API → consistent password on every fresh pod,
-#     no manual step. See scripts/studio_set_password.py.
-( python3 "$REPO/scripts/studio_set_password.py" || true ) &
+# 6. Auto-set the admin password from $STUDIO_ADMIN_PASSWORD once Studio is up (background;
+#    idempotent; no-op if the var is unset, already configured, or the repo was not cloned). Replays
+#    the browser "Setup Account" flow over the REST API → consistent password on every fresh pod.
+[ -n "$REPO" ] && [ -f "$REPO/scripts/studio_set_password.py" ] && \
+  ( python3 "$REPO/scripts/studio_set_password.py" || true ) &
 
-# 4. Launch the Studio web UI in the foreground (keeps the container alive), bound to all
-#    interfaces on 8000 so the RunPod proxy / SSH tunnel can reach it.
-#    NB: the installer venv is named "unsloth_studio" (NOT ".venv"), and the binary path /
-#    PATH shim is not reliably present in this non-interactive shell — so discover the binary
-#    rather than hardcoding it (verified live 2026-06-29: hardcoding .venv/bin/unsloth fails).
+# 7. Launch the Studio web UI in the foreground (keeps the container alive), bound to all interfaces
+#    on 8000. The installer venv is named "unsloth_studio" (NOT ".venv") and the PATH shim is not
+#    reliably present in this non-interactive shell — so discover the binary rather than hardcode it
+#    (verified live 2026-06-29: hardcoding .venv/bin/unsloth fails the exec and kills the container).
 UNSLOTH_BIN="$(command -v unsloth || find "$UNSLOTH_STUDIO_HOME" /root/.unsloth -type f -name unsloth -path "*/bin/*" 2>/dev/null | head -1)"
 exec "$UNSLOTH_BIN" studio -H 0.0.0.0 -p 8000'
 ```
 
 Notes:
-- The installer **does not auto-start** in a non-tty (it just prints instructions) — that's why we
-  launch explicitly in step 4. It auto-detects the GPU and pulls a CUDA-matched torch into its venv.
-- First boot is slow (apt + uv venv + torch download + llama.cpp build = several minutes). Watch
-  progress over SSH: `tail -f` the container log, or just `pod doctor` once SSH is up.
-- `nano`/`tmux`/`rsync` are there so the `pod` CLI's `sync`/`pull` and interactive debugging work.
-- Set the template env var **`STUDIO_ADMIN_PASSWORD=<your consistent pw>`** to skip the manual
-  browser Setup on every fresh pod (see "Password automation" below). Omit it to set the password
-  by hand in the browser.
+- `set -uo pipefail` (no `-e`): network-ish steps (`git`, the password script) are guarded with
+  `|| true` so a transient failure never kills the boot before Studio launches.
+- The installer **does not auto-start** in a non-tty — that's why step 7 launches explicitly. It
+  auto-detects the GPU and pulls a CUDA-matched torch into its venv.
+- First boot is slow (apt + uv venv + torch download + llama.cpp build = several minutes). Watch over
+  SSH (`pod doctor` once SSH is up; processes under `$UNSLOTH_STUDIO_HOME`).
+- The password automation (step 6) requires `REPO_URL` set **and** the repo pushed to GitHub. Omit
+  `STUDIO_ADMIN_PASSWORD` to set the password by hand in the browser instead.
 
 ### Password automation & persistence (reverse-engineered + confirmed live 2026-06-29)
 

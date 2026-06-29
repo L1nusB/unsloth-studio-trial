@@ -1,14 +1,10 @@
 ---
 name: unsloth-studio
 description: >-
-  Deploy, reach, and automate Unsloth Studio (the no-code fine-tuning web UI) on RunPod — from
-  bringing up the pod, to logging in, to driving its REST API (start/monitor/stop training runs,
-  manage datasets/models, export GGUF). Use this whenever the user mentions Unsloth Studio, the
-  "studio pod", `studio_api.py` / `studio_set_password.py`, fine-tuning via the Studio UI or API
-  (rather than the code pipeline), or hits a Studio-on-RunPod problem (SSH dropping under training
-  load, proxy 403s, the admin-password/Setup prompt on every fresh pod, dataset-mapping limits).
-  Reach for it even when "Unsloth Studio" isn't named but the task is clearly about driving that
-  web UI / its API on a remote GPU.
+  Deploy, reach, and automate Unsloth Studio (the no-code fine-tuning web UI) on RunPod — bringing up
+  the studio pod, logging in, or driving its REST API (start/monitor training runs, fix proxy or auth
+  issues). Any task about the Unsloth Studio pod, its web UI, or its API — including its scripts like
+  studio_api.py — runs through this skill, even when "Unsloth Studio" isn't named.
 ---
 
 # Automating Unsloth Studio on RunPod

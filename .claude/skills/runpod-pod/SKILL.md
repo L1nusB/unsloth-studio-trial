@@ -49,6 +49,13 @@ subcommand: `uv run pod --pod <id> doctor` (not `pod doctor --pod <id>`).
   the host/port fresh on every invocation (never cached). `RUNPOD_POD_ID` in `.env` goes stale
   when the pod is recreated — refresh it (`runpodctl pod list`) or pass `--pod <id>`. A handle
   from a previous pod will warn on `logs`/`status` (host mismatch) but still try.
+- **A live pod's direct-TCP port can briefly *refuse* connections mid-session.** You may hit
+  `ssh: connect to host <ip> port <port>: Connection refused` on a freshly-resolved port even
+  though the pod is up and healthy — RunPod's TCP mapping churns and `runpodctl ssh info` can hand
+  back a port that is momentarily not accepting. This is **not** a restart (the container hostname
+  stays stable). **Just retry** — it self-recovers within a few attempts/seconds. Only treat it as
+  real if every retry over ~a minute fails (then re-check the pod in the dashboard). For unattended
+  loops, wrap `pod run` in a small retry.
 - **Direct-TCP only.** A proxy-only pod (no public IP / TCP port 22 exposed) cannot be driven
   — `doctor`/`resolve` aborts with that diagnosis; recreate the pod with TCP port 22 + a public IP.
 - **The agent SSH key must already be on the pod.** RunPod injects account-synced keys at pod

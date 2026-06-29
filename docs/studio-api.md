@@ -23,11 +23,22 @@ dataset config, model management, and inference.
 - `POST /api/auth/desktop-login {secret}` — local desktop secret path (secret lives in the `app_secrets`
   table in `auth.db`); not needed if you use a password or API key.
 
-### To let me (the agent) drive Studio
-I authenticate over `pod run` + `curl localhost:8000`. I need a credential — either:
-- **the admin password** (you set it / it's the `STUDIO_ADMIN_PASSWORD` value) → I `POST /api/auth/login`, or
-- **an API key** you mint in the UI (Settings → API keys) or via `POST /api/auth/api-keys` → you hand me
-  the key and I never need your password.
+### To let me (the agent) drive Studio — no secret ever passed
+Because `STUDIO_ADMIN_PASSWORD` is a RunPod template env var, it's in the pod's environment, and the
+agent is root on the pod over SSH. So the credential is **read from the pod at runtime** — never
+pasted into chat, the repo, or `.env`. Use **`scripts/studio_api.py`** (reads `STUDIO_API_KEY` or
+`STUDIO_ADMIN_PASSWORD` from the env, authenticates, prints only the response):
+
+```bash
+# on the pod (driven via `uv run pod run`):
+python3 /workspace/unsloth-studio-trial/scripts/studio_api.py GET /api/train/status
+python3 /workspace/unsloth-studio-trial/scripts/studio_api.py POST /api/train/start @cfg.json
+```
+
+**API keys are per-pod-ephemeral** (stored in `auth.db`, which is wiped on teardown unless you keep a
+`/workspace` volume). So a "shared persistent API key" does **not** survive fresh pods — the durable
+shared credential is the **password** (`STUDIO_ADMIN_PASSWORD`). Mint a throwaway key per pod via
+`POST /api/auth/api-keys` only if you want one for a single session.
 
 Read-only/unauth endpoints (`/api/health`, `/api/auth/status`, `/openapi.json`) need no credential.
 

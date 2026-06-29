@@ -11,6 +11,7 @@ A small sandbox for trying **Unsloth Studio** (Unsloth's no-code fine-tuning web
 - **`docs/studio-api.md`** — Studio's REST API: auth (bearer / API keys) and how to drive it programmatically.
 - **`docs/dataset-formatting.md`** — what dataset mapping / Data Recipes can and can't do vs the code pipeline.
 - **`scripts/studio_set_password.py`** — auto-sets the admin password from `STUDIO_ADMIN_PASSWORD` on a fresh pod.
+- **`scripts/studio_api.py`** — call the Studio REST API with auto-auth (reads the credential from the pod env; no secret on the CLI).
 - **`CLAUDE.md`** — how to work in this repo.
 
 ## One-line gist

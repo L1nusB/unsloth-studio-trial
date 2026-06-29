@@ -1,11 +1,14 @@
 # Unsloth Studio on RunPod — feasibility + roadmap
 
-**Status:** research complete (2026-06-29). No pod live yet. Deployment recipe being finalized
-(verifying the official image). Goal: get Unsloth Studio running on a RunPod GPU and reachable
-from the Mac browser, as a quick comparison/sandbox alongside our code-based pipeline.
+**Status:** ✅ **VALIDATED LIVE (2026-06-29).** Path B recipe ran end-to-end on pod
+`gano1kb0v3gwky` (1×A40): base image → start command → install.sh → step-4 launch → **Studio
+serving on `0.0.0.0:8000`**, reachable via `https://gano1kb0v3gwky-8000.proxy.runpod.net`, browser
+Setup completed. `pod` CLI (ported here) drives the pod over SSH. Remaining: decide-later smoke
+fine-tune; adopt `UNSLOTH_STUDIO_HOME` persistence on the next pod.
 
-**Verdict: feasible and low-effort.** Studio is a normal FastAPI+React web app, an official
-RunPod image source exists, and our existing SSH/`pod` workflow covers the robust-access path.
+**Verdict: feasible and low-effort — proven.** Studio is a normal FastAPI+React web app; our base
+image + start command brings it up, and our SSH/`pod` workflow drives it. See `deployment.md` for
+the validated recipe (incl. the venv-name gotcha + persistence via `UNSLOTH_STUDIO_HOME`).
 
 ---
 

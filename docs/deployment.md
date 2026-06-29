@@ -43,8 +43,8 @@ build, no registry.
 | **Expose TCP Ports** | `22` (SSH — required for `pod` CLI + `-L` tunnel) |
 | **Public IP** | yes (required for direct-TCP SSH) |
 | **GPU** | one A40 / L40 / 4090-class is plenty for a smoke test |
-| **Volume** | network volume at `/workspace` recommended (checkpoints persist across restarts) |
-| **Env vars** | `UNSLOTH_ADMIN_PASSWORD=<choose>` (see auth note below); ensure your **SSH public key is on your RunPod account before the pod boots** |
+| **Volume** | **network volume at `/workspace` (strongly recommended)** — required for the persistence below |
+| **Env vars** | `UNSLOTH_STUDIO_HOME=/workspace/.studio` (persists venv + admin login + db + llama.cpp build → set password once, fast reboots — see "Persistence & auth"); optionally `HF_HOME=/workspace/.cache/huggingface`, `UV_CACHE_DIR=/workspace/.cache/uv`, `HF_TOKEN=…`. Ensure your **SSH public key is on your RunPod account before the pod boots** |
 
 ### Container Start Command
 
@@ -54,6 +54,12 @@ the only base-image dependency is `/start.sh`, which brings up sshd+`PUBLIC_KEY`
 ```bash
 bash -lc 'set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive PIP_ROOT_USER_ACTION=ignore
+
+# 0. Persist Studio (venv + auth/ + studio.db + cache + llama.cpp build) on the /workspace
+#    volume. install.sh AND the launch in step 4 both read this var, so the admin password is
+#    set ONCE (survives restarts) and reboots reuse the install instead of re-provisioning.
+#    Set it as a template env var, or fall back to this default. (Needs /workspace = a volume.)
+export UNSLOTH_STUDIO_HOME="${UNSLOTH_STUDIO_HOME:-/workspace/.studio}"
 
 # 1. Bring up base services (sshd w/ PUBLIC_KEY injection + JupyterLab) in the background,
 #    so SSH is reachable immediately while Studio installs.
@@ -71,11 +77,12 @@ apt-get update && apt-get install -y --no-install-recommends \
 curl -fsSL https://unsloth.ai/install.sh | sh
 
 # 4. Launch the Studio web UI in the foreground (keeps the container alive), bound to all
-#    interfaces on 8000 so the RunPod proxy / SSH tunnel can reach it.
+#    interfaces on 8000 so the RunPod proxy / SSH tunnel can reach it. UNSLOTH_STUDIO_HOME is
+#    inherited from step 0 so the launch uses the same persisted install/auth.
 #    NB: the installer venv is named "unsloth_studio" (NOT ".venv"), and the binary path /
 #    PATH shim is not reliably present in this non-interactive shell — so discover the binary
 #    rather than hardcoding it (verified live 2026-06-29: hardcoding .venv/bin/unsloth fails).
-UNSLOTH_BIN="$(command -v unsloth || find /root/.unsloth -type f -name unsloth -path "*/bin/*" | head -1)"
+UNSLOTH_BIN="$(command -v unsloth || find "$UNSLOTH_STUDIO_HOME" /root/.unsloth -type f -name unsloth -path "*/bin/*" 2>/dev/null | head -1)"
 exec "$UNSLOTH_BIN" studio -H 0.0.0.0 -p 8000'
 ```
 
@@ -86,12 +93,21 @@ Notes:
   progress over SSH: `tail -f` the container log, or just `pod doctor` once SSH is up.
 - `nano`/`tmux`/`rsync` are there so the `pod` CLI's `sync`/`pull` and interactive debugging work.
 
-### First-run auth (verify live)
-The official *image* reads `UNSLOTH_ADMIN_PASSWORD` to bootstrap the admin account. The **CLI
-install** path uses Studio's built-in JWT auth with a **first-run setup flow** (a setup token /
-`/change-password` step). Whether the bare CLI also honors `UNSLOTH_ADMIN_PASSWORD` is **unconfirmed**
-— set it anyway (harmless), and on first launch **check the Studio logs for a setup token / signup
-URL**. We'll pin this down during the Phase-2 smoke test and record the exact flow here.
+### Persistence & auth (confirmed live 2026-06-29)
+On first visit to the proxy URL, Studio shows a **Setup Account** page where you choose the admin
+password **in the browser**. The official-image env var `UNSLOTH_ADMIN_PASSWORD` is a feature of
+that image's `start.sh`, **NOT** of the CLI install we use — so on our path you cannot seed the
+password via env var. **Do not** put a Studio password in `.env` (nothing we run reads it).
+
+The reason you'd otherwise re-do Setup on every pod: the admin account lives in
+`$UNSLOTH_STUDIO_HOME/auth/`, which defaults to the **ephemeral container disk**
+(`/root/.unsloth/studio`). Fix = step 0 above: set `UNSLOTH_STUDIO_HOME=/workspace/.studio` on the
+**persistent volume** so `auth/`, `studio.db`, the venv, and the llama.cpp build all survive. Then:
+- you complete **Setup once, ever** — the password persists across restarts (no manual step, no env var);
+- **reboots are fast** — install.sh reuses the persisted venv instead of re-downloading torch/llama.cpp.
+
+(Per the docs' "Main repo install", `UNSLOTH_STUDIO_HOME` must be present at **both** install and
+launch; step 0 exports it so both inherit it. Requires `/workspace` to be a real attached volume.)
 
 ### After the pod is up
 1. `RUNPOD_POD_ID=<id>` in this repo's `.env` (and/or the `llm-fine-tuning` `.env` to use `pod`).

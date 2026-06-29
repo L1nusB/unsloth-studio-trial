@@ -65,14 +65,18 @@ apt-get update && apt-get install -y --no-install-recommends \
   cmake build-essential libcurl4-openssl-dev git curl rsync tmux nano && \
   rm -rf /var/lib/apt/lists/*
 
-# 3. Install Unsloth + Studio. Creates its OWN uv venv at /root/.unsloth/studio/.venv
+# 3. Install Unsloth + Studio. Creates its OWN uv venv under /root/.unsloth/studio/
 #    (own Python 3.13 + own cu-matched torch); the base image torch is ignored, no conflict.
 #    Do NOT set UNSLOTH_NO_TORCH=1 — that is GGUF-only and disables training.
 curl -fsSL https://unsloth.ai/install.sh | sh
 
 # 4. Launch the Studio web UI in the foreground (keeps the container alive), bound to all
 #    interfaces on 8000 so the RunPod proxy / SSH tunnel can reach it.
-exec /root/.unsloth/studio/.venv/bin/unsloth studio -H 0.0.0.0 -p 8000'
+#    NB: the installer venv is named "unsloth_studio" (NOT ".venv"), and the binary path /
+#    PATH shim is not reliably present in this non-interactive shell — so discover the binary
+#    rather than hardcoding it (verified live 2026-06-29: hardcoding .venv/bin/unsloth fails).
+UNSLOTH_BIN="$(command -v unsloth || find /root/.unsloth -type f -name unsloth -path "*/bin/*" | head -1)"
+exec "$UNSLOTH_BIN" studio -H 0.0.0.0 -p 8000'
 ```
 
 Notes:

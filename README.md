@@ -6,8 +6,11 @@ A small sandbox for trying **Unsloth Studio** (Unsloth's no-code fine-tuning web
 
 ## Start here
 - **`docs/roadmap.md`** — the living plan, current status, and decisions.
-- **`docs/deployment.md`** — RunPod template / container-image / start-command recipe.
+- **`docs/deployment.md`** — RunPod template / container-image / start-command recipe (incl. password automation).
 - **`docs/runpod-access.md`** — reaching the Studio UI (proxy URL vs SSH `-L` tunnel).
+- **`docs/studio-api.md`** — Studio's REST API: auth (bearer / API keys) and how to drive it programmatically.
+- **`docs/dataset-formatting.md`** — what dataset mapping / Data Recipes can and can't do vs the code pipeline.
+- **`scripts/studio_set_password.py`** — auto-sets the admin password from `STUDIO_ADMIN_PASSWORD` on a fresh pod.
 - **`CLAUDE.md`** — how to work in this repo.
 
 ## One-line gist

@@ -1,0 +1,17 @@
+# Local-only artifacts
+.local_data/
+.env
+*.log
+
+# macOS
+.DS_Store
+
+# Python (if any local tooling lands here)
+__pycache__/
+*.pyc
+.venv/
+
+# SSH keys / secrets — never commit
+*.pem
+id_*
+!*.pub.example
